@@ -37,6 +37,7 @@ import cv2
 import cv_bridge
 import image_geometry
 import math
+import numpy as np
 import numpy.linalg
 import pickle
 import random
@@ -217,8 +218,11 @@ def _get_corners(img, board, refine = True, checkerboard_flags=0):
         mono = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     else:
         mono = img
-    (ok, corners) = cv2.findChessboardCorners(mono, (board.n_cols, board.n_rows), flags = cv2.CALIB_CB_ADAPTIVE_THRESH |
-                                              cv2.CALIB_CB_NORMALIZE_IMAGE | checkerboard_flags)
+    # (ok, corners) = cv2.findChessboardCorners(mono, (board.n_cols, board.n_rows), flags = cv2.CALIB_CB_ADAPTIVE_THRESH |
+    #                                           cv2.CALIB_CB_NORMALIZE_IMAGE | checkerboard_flags)
+    (ok, corners) = cv2.findChessboardCornersSB(mono, (board.n_cols, board.n_rows), flags = cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY | cv2.CALIB_CB_NORMALIZE_IMAGE)
+    
+    
     if not ok:
         return (ok, corners)
 
@@ -807,6 +811,8 @@ class MonoCalibrator(Calibrator):
             else:
                 self.distortion = dist_coeffs.flat[:5].reshape(-1, 1) # plumb bob
         elif self.camera_model == CAMERA_MODEL.FISHEYE:
+            # Changed by Nati
+            self.fisheye_calib_flags = cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC | cv2.fisheye.CALIB_CHECK_COND | cv2.fisheye.CALIB_FIX_SKEW
             print("mono fisheye calibration...")
             # WARNING: cv2.fisheye.calibrate wants float64 points
             ipts64 = numpy.asarray(ipts, dtype=numpy.float64)
@@ -842,10 +848,10 @@ class MonoCalibrator(Calibrator):
             self.mapx, self.mapy = cv2.initUndistortRectifyMap(self.intrinsics, self.distortion, self.R, ncm, self.size, cv2.CV_32FC1)
         elif self.camera_model == CAMERA_MODEL.FISHEYE:
             # NOTE: cv2.fisheye.estimateNewCameraMatrixForUndistortRectify not producing proper results, using a naive approach instead:
-            self.P[:3,:3] = self.intrinsics[:3,:3]
-            self.P[0,0] /= (1. + a)
-            self.P[1,1] /= (1. + a)
-            self.mapx, self.mapy = cv2.fisheye.initUndistortRectifyMap(self.intrinsics, self.distortion, self.R, self.P, self.size, cv2.CV_32FC1)
+            # Changed by Nati
+            new_k = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(self.intrinsics, self.distortion, self.size, np.eye(3), balance=0.8, new_size=self.size)
+            self.P[:3,:3] = new_k
+            self.mapx, self.mapy = cv2.fisheye.initUndistortRectifyMap(self.intrinsics, self.distortion, self.R, new_k, self.size, cv2.CV_32FC1)
 
 
     def remap(self, src):
